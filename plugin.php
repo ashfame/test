@@ -37,6 +37,10 @@ class GrabConversions_Core {
 		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
 
 		add_action( 'plugins_loaded', array( $this, 'init' ) );
+
+		if ( is_admin() ) {
+		    require 'includes/subscribers_list.php';
+        }
 	}
 
 	public static function getInstance() {
@@ -84,6 +88,8 @@ class GrabConversions_Core {
 
 		add_action( 'widgets_init', array( $this, 'widget_init' ), 10, 2 );
 		add_filter( 'plugin_action_links', array( $this, 'plugin_action_links' ), 10, 2 );
+
+		add_action( 'admin_menu', array( $this, 'add_gc_menu_page' ) );
 
 		// widget + add-ons announce after collecting optin data for processing
 		add_action( 'grabconversions_announce_optin', array( $this, 'collect_optin_data' ) );
@@ -133,6 +139,34 @@ class GrabConversions_Core {
 			$links = array_merge( array( $settings_link, $support_link, $report_issue_link ), $links );
 		}
 		return $links;
+	}
+
+	public function add_gc_menu_page() {
+		add_menu_page(
+			__( 'Grab Conversions', 'textdomain' ),
+			'Grab Conversions&nbsp;&nbsp;&nbsp;',
+			'manage_options',
+			'grabconversions.php',
+			array( $this, 'gc_menu_page_render' ),
+			'dashicons-email',
+			60
+		);
+	}
+
+	public function gc_menu_page_render() {
+		$GrabConversions_Subscribers_List_Table = new GrabConversions_Subscribers_List_Table();
+		?>
+		<div class="wrap">
+			<div id="icon-users" class="icon32"></div>
+			<h2>Grab Conversions</h2>
+            <?php $GrabConversions_Subscribers_List_Table->prepare_items(); ?>
+            <form method="post">
+                <input type="hidden" name="page" value="grabconversions_subscriber_search" />
+			    <?php $GrabConversions_Subscribers_List_Table->search_box( 'search', 'search_id' ); ?>
+            </form>
+            <?php $GrabConversions_Subscribers_List_Table->display(); ?>
+		</div>
+		<?php
 	}
 
 	public function generate_confirmation_key( $email, $skip_db_write = false ) {
@@ -196,8 +230,20 @@ class GrabConversions_Core {
 			}
 		} else {
 			// user is already a subscriber
-			if ( $result['status'] ) {
+			if ( $result['status'] == 1 ) {
 				// user is already confirmed, nothing to do here till we have tags/segments to worry about
+			} else if ( $result['status'] == 9 ) {
+                // user is deleted, bring it back to life
+				$wpdb->update(
+					self::$subscribers_table_name,
+					array( 'status' => 0 ),
+					array( 'id' => $result['id'] ),
+					array( '%d' ),
+					array( '%d' )
+				);
+
+				// send double-optin email to the subscriber now
+				$this->send_double_optin_confirmation_email( $data['email'] );
 			} else {
 				// send another double-optin email to the subscriber
 				$this->send_double_optin_confirmation_email( $data['email'] );
@@ -268,10 +314,12 @@ class GrabConversions_Core {
 			die( 'Invalid link! We don\'t have any records for your email.' );
 		} else {
 			if ( $email_hash == md5( $result['email'] ) ) {
-				// verified, delete from list now
-				$wpdb->delete(
+				// verified, mark status as deleted/unsubscribed
+				$wpdb->update(
 					self::$subscribers_table_name,
+                    array( 'status' => 9 ),
 					array( 'id' => $result['id'] ),
+					array( '%d' ),
 					array( '%d' )
 				);
 				die( 'Sorry to see you go! You have been unsubscribed.' );
