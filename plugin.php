@@ -90,6 +90,8 @@ class GrabConversions_Core {
 		add_filter( 'plugin_action_links', array( $this, 'plugin_action_links' ), 10, 2 );
 
 		add_action( 'admin_menu', array( $this, 'add_gc_menu_page' ) );
+		add_action( 'admin_head', array( $this, 'admin_header' ) );
+		add_filter( 'set-screen-option', array( $this, 'gc_menu_page_set_screen_options' ), 10, 3 );
 
 		// widget + add-ons announce after collecting optin data for processing
 		add_action( 'grabconversions_announce_optin', array( $this, 'collect_optin_data' ) );
@@ -124,6 +126,18 @@ class GrabConversions_Core {
 		) );
 	}
 
+	public function admin_header() {
+		$page = ( isset( $_GET[ 'page' ] ) ) ? esc_attr( $_GET[ 'page' ] ) : false;
+		if ( 'grabconversions.php' != $page )
+			return;
+
+		echo '<style type="text/css">';
+		echo '.wp-list-table .column-name { width: 40%; }';
+		echo '.wp-list-table .column-email { width: 40%; }';
+		echo '.wp-list-table .column-status { width: 20%; text-align:center; }';
+		echo '</style>';
+	}
+
 	public function widget_init() {
 		require plugin_dir_path( __FILE__ ) . 'includes/widget.php';
 
@@ -142,7 +156,7 @@ class GrabConversions_Core {
 	}
 
 	public function add_gc_menu_page() {
-		add_menu_page(
+		$hook = add_menu_page(
 			__( 'Grab Conversions', 'textdomain' ),
 			'Grab Conversions&nbsp;&nbsp;&nbsp;',
 			'manage_options',
@@ -151,7 +165,23 @@ class GrabConversions_Core {
 			'dashicons-email',
 			60
 		);
+
+		add_action( 'load-' . $hook, array( $this, 'gc_menu_page_screen_options' ) );
 	}
+
+	public function gc_menu_page_screen_options() {
+		$option = 'per_page';
+		$args = array(
+			'label' => 'Subscribers',
+			'default' => 100,
+			'option' => 'subscribers_per_page'
+		);
+		add_screen_option( $option, $args );
+    }
+
+    public function gc_menu_page_set_screen_options( $status, $option, $value ) {
+        return $value;
+    }
 
 	public function gc_menu_page_render() {
 		$GrabConversions_Subscribers_List_Table = new GrabConversions_Subscribers_List_Table();

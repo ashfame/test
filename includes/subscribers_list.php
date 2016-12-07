@@ -13,21 +13,18 @@ class GrabConversions_Subscribers_List_Table extends WP_List_Table {
 
 		self::$subscribers_table_name = $wpdb->prefix . 'grabconversions_list_data';
 
-		add_action( 'admin_head', array( $this, 'admin_header' ) );
-
 		parent::__construct( array(
 			'singular' => __( 'subscriber', 'whatsapp' ),
-			'plural'   => __( 'subscribers', 'whatsapp' ),
-			'ajax'     => true
+			'plural'   => __( 'subscribers', 'whatsapp' )
 		) );
 	}
 
-	public function admin_header() {
-
-	}
-
 	public function no_items() {
-		_e( 'No subscribers found!' );
+		if ( isset( $_POST[ 'page' ] ) && isset( $_POST[ 's' ] ) && $_POST[ 'page' ] == 'grabconversions_subscriber_search' ) {
+			_e( 'No subscribers found!' );
+		} else {
+			_e( 'No subscribers found! Why not add yourself as the first subscriber as a test? You will also get to see how your subscribers see the emails in their inbox, when you send a broadcast.' );
+		}
 	}
 
 	public function get_columns() {
@@ -70,7 +67,7 @@ class GrabConversions_Subscribers_List_Table extends WP_List_Table {
 	}
 
 	public function prepare_items() {
-		global $wpdb;
+		global $wpdb, $current_user;
 
 		$columns               = $this->get_columns();
 		$hidden                = array();
@@ -93,7 +90,8 @@ class GrabConversions_Subscribers_List_Table extends WP_List_Table {
 
 			$data = $wpdb->get_results( $query, ARRAY_A );
 
-			$per_page     = 2;
+			$per_page = absint( get_user_meta( $current_user->ID, 'subscribers_per_page', true ) );
+			$per_page = $per_page ? $per_page : 100;
 			$current_page = $this->get_pagenum();
 			$total_items  = count( $data );
 
