@@ -22,16 +22,18 @@ class GrabConversions_Core {
 	public static $required_php_version = '5.6';
 	public static $required_mysql_version = '5.6'; // not sure how to use / check this one
 
-	private static $subscribers_table_name;
+	public static $subscribers_table_name;
+	public static $subscriber_statuses;
 
 	public function __construct() {
 		global $wpdb;
 
-		if ( ! $this->is_compatible() ) {
+		if ( !$this->is_compatible() ) {
 			return;
 		}
 
 		self::$subscribers_table_name = $wpdb->prefix . 'grabconversions_list_data';
+		self::$subscriber_statuses    = array( 0 => 'unconfirmed', 1 => 'confirmed', 9 => 'deleted' );
 
 		register_activation_hook( __FILE__, array( $this, 'activate' ) );
 		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
@@ -39,14 +41,15 @@ class GrabConversions_Core {
 		add_action( 'plugins_loaded', array( $this, 'init' ) );
 
 		if ( is_admin() ) {
-		    require 'includes/subscribers_list.php';
-        }
+			require 'includes/subscribers_list.php';
+		}
 	}
 
 	public static function getInstance() {
-		if ( ! self::$instance ) {
+		if ( !self::$instance ) {
 			self::$instance = new self;
 		}
+
 		return self::$instance;
 	}
 
@@ -58,10 +61,10 @@ class GrabConversions_Core {
 		$collate = '';
 
 		if ( $wpdb->has_cap( 'collation' ) ) {
-			if ( ! empty( $wpdb->charset ) ) {
+			if ( !empty( $wpdb->charset ) ) {
 				$collate .= "DEFAULT CHARACTER SET $wpdb->charset";
 			}
-			if ( ! empty( $wpdb->collate ) ) {
+			if ( !empty( $wpdb->collate ) ) {
 				$collate .= " COLLATE $wpdb->collate";
 			}
 		}
@@ -113,10 +116,8 @@ class GrabConversions_Core {
 	 */
 	public function is_compatible() {
 		global $wp_version;
-		return apply_filters(
-			'grabconversions_compatibility',
-			version_compare( $wp_version, self::$required_wp_version, '>=' ) && version_compare( phpversion(), self::$required_php_version )
-		);
+
+		return apply_filters( 'grabconversions_compatibility', version_compare( $wp_version, self::$required_wp_version, '>=' ) && version_compare( phpversion(), self::$required_php_version ) );
 	}
 
 	public function enqueue_scripts() {
@@ -128,7 +129,7 @@ class GrabConversions_Core {
 
 	public function admin_header() {
 		$page = ( isset( $_GET[ 'page' ] ) ) ? esc_attr( $_GET[ 'page' ] ) : false;
-		if ( 'grabconversions.php' != $page )
+		if ( 'grabconversions_subscribers_list' != $page )
 			return;
 
 		echo '<style type="text/css">';
@@ -147,71 +148,106 @@ class GrabConversions_Core {
 	public function plugin_action_links( $links, $file ) {
 		// Also check using strpos because when plugin is actually a symlink inside plugins folder, its plugin_basename will be based off its actual path
 		if ( $file == plugin_basename( __FILE__ ) || strpos( plugin_basename( __FILE__ ), $file ) !== false ) {
-			$settings_link = '<a href="' . admin_url( 'options-general.php?page=grabconversions' ) . '">Settings</a>';
-			$support_link = '<a href="https://grabconversions.com/free-to-pro-upgrade/">Pro Upgrade</a>';
+			$settings_link     = '<a href="' . admin_url( 'options-general.php?page=grabconversions' ) . '">Settings</a>';
+			$support_link      = '<a href="https://grabconversions.com/free-to-pro-upgrade/">Pro Upgrade</a>';
 			$report_issue_link = '<a href="mailto:support@grabconversions.com">Report Issue</a>';
-			$links = array_merge( array( $settings_link, $support_link, $report_issue_link ), $links );
+			$links             = array_merge( array( $settings_link, $support_link, $report_issue_link ), $links );
 		}
+
 		return $links;
 	}
 
 	public function add_gc_menu_page() {
-		$hook = add_menu_page(
-			__( 'Grab Conversions', 'textdomain' ),
-			'Grab Conversions&nbsp;&nbsp;&nbsp;',
-			'manage_options',
-			'grabconversions.php',
-			array( $this, 'gc_menu_page_render' ),
-			'dashicons-email',
-			60
-		);
+		$hook = add_menu_page( __( 'Grab Conversions', 'textdomain' ), 'Grab Conversions&nbsp;&nbsp;&nbsp;', 'manage_options', 'grabconversions_subscribers_list', array( $this, 'gc_menu_page_render' ), 'dashicons-email', 60 );
+		add_submenu_page( 'grabconversions_subscribers_list', 'Subscribers', 'Subscribers', 'manage_options', 'grabconversions_subscribers_list', array( $this, 'gc_menu_page_render' ) );
+		add_submenu_page( 'grabconversions_subscribers_list', 'Broadcast', 'Broadcast', 'manage_options', 'grabconversions_broadcast', array( $this, 'gc_menu_broadcast_page_render' ) );
 
 		add_action( 'load-' . $hook, array( $this, 'gc_menu_page_screen_options' ) );
 	}
 
 	public function gc_menu_page_screen_options() {
 		$option = 'per_page';
-		$args = array(
-			'label' => 'Subscribers',
+		$args   = array(
+			'label'   => 'Subscribers',
 			'default' => 100,
-			'option' => 'subscribers_per_page'
+			'option'  => 'subscribers_per_page'
 		);
 		add_screen_option( $option, $args );
-    }
+	}
 
-    public function gc_menu_page_set_screen_options( $status, $option, $value ) {
-        return $value;
-    }
+	public function gc_menu_page_set_screen_options( $status, $option, $value ) {
+		return $value;
+	}
+
+	public function get_subscribers_summary() {
+		global $wpdb;
+
+        $summary = array();
+
+        foreach ( self::$subscriber_statuses as $key => $label ) {
+            $summary[ 'count' ][ $key ] = $wpdb->get_var( "SELECT COUNT(*) FROM " . self::$subscribers_table_name . " WHERE status = $key;" );
+        }
+
+        update_option( 'gc_cache_subscribers_summary', $summary, true );
+
+		return $summary;
+	}
 
 	public function gc_menu_page_render() {
 		$GrabConversions_Subscribers_List_Table = new GrabConversions_Subscribers_List_Table();
 		?>
-		<div class="wrap">
-			<div id="icon-users" class="icon32"></div>
-			<h2>Grab Conversions</h2>
-            <?php $GrabConversions_Subscribers_List_Table->prepare_items(); ?>
-            <form method="post">
-                <input type="hidden" name="page" value="grabconversions_subscriber_search" />
-			    <?php $GrabConversions_Subscribers_List_Table->search_box( 'search', 'search_id' ); ?>
+        <div class="wrap">
+            <div id="icon-users" class="icon32"></div>
+            <h2>Grab Conversions</h2>
+			<?php $GrabConversions_Subscribers_List_Table->prepare_items(); ?>
+            <form method="GET">
+                <input type="hidden" name="page" value="grabconversions_subscribers_list"/>
+				<?php $GrabConversions_Subscribers_List_Table->search_box( 'search', 'search_id' ); ?>
             </form>
-            <?php $GrabConversions_Subscribers_List_Table->display(); ?>
-		</div>
+            <form method="POST">
+                <?php
+                $admin_url           = admin_url( 'admin.php?page=grabconversions_subscribers_list' );
+                $subscribers_summary = $this->get_subscribers_summary();
+                ?>
+                <ul class="subsubsub">
+                    <li class="all">
+                        <a href="<?php echo $admin_url; ?>"
+                           class="<?php if ( strpos( 'http://' . $_SERVER[ 'HTTP_HOST' ] . $_SERVER[ 'REQUEST_URI' ], $admin_url ) === 0 && strpos( $_SERVER[ 'REQUEST_URI' ], '&status=' ) === false )
+                               echo 'current'; ?>">
+                            <?php _e( 'All' ); ?>
+                            <span class="count">(<?php echo array_sum( $subscribers_summary[ 'count' ] ); ?>)</span>
+                        </a>
+                    </li>
+                    <?php foreach ( self::$subscriber_statuses as $key => $label ) { ?>
+                        <?php if ( $key == 9 )
+                            continue; ?>
+                        <li class="">|
+                            <a href="<?php echo add_query_arg( 'status', $label, $admin_url ); ?>"
+                               class="<?php if ( strpos( 'http://' . $_SERVER[ 'HTTP_HOST' ] . $_SERVER[ 'REQUEST_URI' ], add_query_arg( 'status', $label, $admin_url ) ) === 0 )
+                                   echo 'current'; ?>">
+                                <?php _e( ucfirst( $label ) ); ?>
+                                <span class="count">(<?php echo $subscribers_summary[ 'count' ][ $key ]; ?>)</span>
+                            </a>
+                        </li>
+                    <?php } ?>
+                </ul>
+                <?php $GrabConversions_Subscribers_List_Table->display(); ?>
+            </form>
+        </div>
 		<?php
 	}
+
+	public function gc_menu_broadcast_page_render() {
+
+    }
 
 	public function generate_confirmation_key( $email, $skip_db_write = false ) {
 		global $wpdb;
 
 		$confirmation_key = substr( md5( time() . rand() . $email ), 0, 16 );
 
-		if ( ! $skip_db_write ) {
-			$result = $wpdb->update(
-				self::$subscribers_table_name,
-				array( 'confirmation_key' => $confirmation_key ),
-				array( 'email' => $email ),
-				array( '%s' ),
-				array( '%s' )
-			);
+		if ( !$skip_db_write ) {
+			$result = $wpdb->update( self::$subscribers_table_name, array( 'confirmation_key' => $confirmation_key ), array( 'email' => $email ), array( '%s' ), array( '%s' ) );
 
 			if ( $result ) {
 				return $confirmation_key;
@@ -227,97 +263,72 @@ class GrabConversions_Core {
 		global $wpdb;
 
 		// lets check if we already have this email as a subscriber (unconfirmed/confirmed)
-		$result = $wpdb->get_row(
-			$wpdb->prepare(
-				"SELECT * FROM " . self::$subscribers_table_name . " WHERE email = '%s';",
-				array( $data['email'] )
-			),
-			ARRAY_A
-		);
+		$result = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM " . self::$subscribers_table_name . " WHERE email = '%s';", array( $data[ 'email' ] ) ), ARRAY_A );
 
 		if ( is_null( $result ) ) {
 			$row = array(
-				'name' => $data['name'],
-				'email' => $data['email'],
-				'status' => $data['doubleoptin'] ? 0 : 1,
-				'confirmation_key' => $data['doubleoptin'] ? $this->generate_confirmation_key( $data['email'], true ) : ''
+				'name'             => $data[ 'name' ],
+				'email'            => $data[ 'email' ],
+				'status'           => $data[ 'doubleoptin' ] ? 0 : 1,
+				'confirmation_key' => $data[ 'doubleoptin' ] ? $this->generate_confirmation_key( $data[ 'email' ], true ) : ''
 			);
 
-			$result = $wpdb->insert(
-				$wpdb->prefix . 'grabconversions_list_data',
-				$row,
-				array(
-					'%s', '%s', '%d', '%s'
-				)
-			);
+			$result = $wpdb->insert( $wpdb->prefix . 'grabconversions_list_data', $row, array(
+					'%s',
+					'%s',
+					'%d',
+					'%s'
+				) );
 
 			if ( $result ) {
-				if ( $data['doubleoptin'] ) { // shouldn't double optin be the only choice, no single-optins allowed #mustThink
-					$this->send_double_optin_confirmation_email( $row['email'], $row['confirmation_key'] );
+				if ( $data[ 'doubleoptin' ] ) { // shouldn't double optin be the only choice, no single-optins allowed #mustThink
+					$this->send_double_optin_confirmation_email( $row[ 'email' ], $row[ 'confirmation_key' ] );
 				}
 			} else {
 				// something went wrong, how often does that happen?
 			}
 		} else {
 			// user is already a subscriber
-			if ( $result['status'] == 1 ) {
+			if ( $result[ 'status' ] == 1 ) {
 				// user is already confirmed, nothing to do here till we have tags/segments to worry about
-			} else if ( $result['status'] == 9 ) {
-                // user is deleted, bring it back to life
-				$wpdb->update(
-					self::$subscribers_table_name,
-					array( 'status' => 0 ),
-					array( 'id' => $result['id'] ),
-					array( '%d' ),
-					array( '%d' )
-				);
+			} else if ( $result[ 'status' ] == 9 ) {
+				// user is deleted, bring it back to life
+				$wpdb->update( self::$subscribers_table_name, array( 'status' => 0 ), array( 'id' => $result[ 'id' ] ), array( '%d' ), array( '%d' ) );
 
 				// send double-optin email to the subscriber now
-				$this->send_double_optin_confirmation_email( $data['email'] );
+				$this->send_double_optin_confirmation_email( $data[ 'email' ] );
 			} else {
 				// send another double-optin email to the subscriber
-				$this->send_double_optin_confirmation_email( $data['email'] );
+				$this->send_double_optin_confirmation_email( $data[ 'email' ] );
 			}
 		}
 	}
 
 	public function send_double_optin_confirmation_email( $email, $confirmation_key = '' ) {
-		if ( ! $confirmation_key ) {
+		if ( !$confirmation_key ) {
 			$confirmation_key = $this->generate_confirmation_key( $email );
 		}
 
 		$email_subscription_link = admin_url( 'admin-ajax.php?action=grabconversions_confirm_email_subscription&who=' . md5( $email ) . '&key=' . $confirmation_key );
-		$email_body = '<p>Hi, Thanks for signing up! Click on this link to confirm your email subscription - <a href="' . $email_subscription_link . '">' . $email_subscription_link . '</a></p>';
+		$email_body              = '<p>Hi, Thanks for signing up! Click on this link to confirm your email subscription - <a href="' . $email_subscription_link . '">' . $email_subscription_link . '</a></p>';
 		wp_mail( $email, 'Activate your email subscription', $email_body );
 	}
 
 	public function confirm_email_subscription() {
 		global $wpdb;
 
-		$email_hash = $_GET['who'];
-		$confirmation_key = $_GET['key'];
+		$email_hash       = $_GET[ 'who' ];
+		$confirmation_key = $_GET[ 'key' ];
 
 		// lets search for a subscriber who has that confirmation key
-		$result = $wpdb->get_row(
-			$wpdb->prepare(
-				"SELECT id, email FROM " . self::$subscribers_table_name . " WHERE confirmation_key = '%s';",
-				$confirmation_key
-			),
-			ARRAY_A
-		);
+		$result = $wpdb->get_row( $wpdb->prepare( "SELECT id, email FROM " . self::$subscribers_table_name . " WHERE confirmation_key = '%s';", $confirmation_key ), ARRAY_A );
 
 		if ( is_null( $result ) ) {
 			die( 'Sorry! The confirmation key doesn\'t match with any of the subscriber.' );
 		} else {
-			if ( $email_hash == md5( $result['email'] ) ) {
+			if ( $email_hash == md5( $result[ 'email' ] ) ) {
 				// verified, mark as confirmed
-				$wpdb->update(
-					self::$subscribers_table_name,
-					array( 'status' => 1 ),
-					array( 'id' => $result['id'] ),
-					array( '%d' ),
-					array( '%d' )
-				);
+				$wpdb->update( self::$subscribers_table_name, array( 'status' => 1 ), array( 'id' => $result[ 'id' ] ), array( '%d' ), array( '%d' ) );
 				die( 'Congrats! Your subscription is confirmed!' );
 			} else {
 				die( 'Sorry! The URL seems to be invalid.' );
@@ -328,30 +339,18 @@ class GrabConversions_Core {
 	public function confirm_email_unsubscription() {
 		global $wpdb;
 
-		$email_hash = $_GET['who'];
-		$confirmation_key = $_GET['key'];
+		$email_hash       = $_GET[ 'who' ];
+		$confirmation_key = $_GET[ 'key' ];
 
 		// lets search for a subscriber who has that confirmation key
-		$result = $wpdb->get_row(
-			$wpdb->prepare(
-				"SELECT id, email FROM " . self::$subscribers_table_name . " WHERE confirmation_key = '%s';",
-				$confirmation_key
-			),
-			ARRAY_A
-		);
+		$result = $wpdb->get_row( $wpdb->prepare( "SELECT id, email FROM " . self::$subscribers_table_name . " WHERE confirmation_key = '%s';", $confirmation_key ), ARRAY_A );
 
 		if ( is_null( $result ) ) {
 			die( 'Invalid link! We don\'t have any records for your email.' );
 		} else {
-			if ( $email_hash == md5( $result['email'] ) ) {
+			if ( $email_hash == md5( $result[ 'email' ] ) ) {
 				// verified, mark status as deleted/unsubscribed
-				$wpdb->update(
-					self::$subscribers_table_name,
-                    array( 'status' => 9 ),
-					array( 'id' => $result['id'] ),
-					array( '%d' ),
-					array( '%d' )
-				);
+				$wpdb->update( self::$subscribers_table_name, array( 'status' => 9 ), array( 'id' => $result[ 'id' ] ), array( '%d' ), array( '%d' ) );
 				die( 'Sorry to see you go! You have been unsubscribed.' );
 			} else {
 				die( 'Sorry! The URL seems to be invalid.' );
