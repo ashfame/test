@@ -75,6 +75,7 @@ class GrabConversions_Core {
 		  name varchar(200) NOT NULL,
 		  email VARCHAR(100) NOT NULL,
 		  status TINYINT NULL DEFAULT 0,
+		  created_at TIMESTAMP NOT NULL,
 		  confirmation_key VARCHAR(255) NULL,
 		  PRIMARY KEY (id)
 		  KEY email (email)
@@ -359,10 +360,13 @@ class GrabConversions_Core {
 		$result = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM " . self::$subscribers_table_name . " WHERE email = '%s';", array( $data[ 'email' ] ) ), ARRAY_A );
 
 		if ( is_null( $result ) ) {
+
+			$now = new DateTime( 'now', new DateTimeZone( 'GMT' ) );
 			$row = array(
 				'name'             => $data[ 'name' ],
 				'email'            => $data[ 'email' ],
 				'status'           => $data[ 'doubleoptin' ] ? 0 : 1,
+				'created_at'       => $now->format( 'Y-m-d h:i:s' ),
 				'confirmation_key' => $data[ 'doubleoptin' ] ? $this->generate_confirmation_key( $data[ 'email' ], true ) : ''
 			);
 
