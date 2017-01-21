@@ -100,10 +100,6 @@ class GrabConversions_Core {
 		// widget + add-ons announce after collecting optin data for processing
 		add_action( 'grabconversions_announce_optin', array( $this, 'collect_optin_data' ) );
 
-		// settings screen
-		add_action( 'wp_ajax_grabconversions_settings_submit', array( $this, 'settings_submit' ) );
-		add_action( 'wp_ajax_nopriv_grabconversions_settings_submit', array( $this, 'settings_submit' ) );
-
 		// handle confirmation of email subscriptions
 		add_action( 'wp_ajax_grabconversions_confirm_email_subscription', array( $this, 'confirm_email_subscription' ) );
 		add_action( 'wp_ajax_nopriv_grabconversions_confirm_email_subscription', array( $this, 'confirm_email_subscription' ) );
@@ -136,7 +132,7 @@ class GrabConversions_Core {
 		if ( $hook == 'grab-conversions_page_grabconversions_settings' ) {
 			wp_enqueue_script( 'grabconversions_admin_js', plugins_url( 'js/admin.js', __FILE__ ), array( 'jquery' ), self::$version, true );
 		}
-    }
+	}
 
 	public function admin_header() {
 		$page = ( isset( $_GET[ 'page' ] ) ) ? esc_attr( $_GET[ 'page' ] ) : false;
@@ -257,12 +253,25 @@ class GrabConversions_Core {
 	}
 
 	public function gc_menu_settings_page_render() {
-	    // Settings API is deliberately not used here, since we want to inject JS show/hide + handle data upgrades as product matures
+		// Settings API is deliberately not used here, since we want to inject JS show/hide + handle data upgrades as product matures
 		$settings = get_option( 'grabconversions_settings', array() );
+
+		if ( isset( $_REQUEST[ 'gc' ] ) ) {
+			$settings                          = array();
+			$settings[ 'email_engine' ]        = $_REQUEST[ 'gc' ][ 'email_engine' ] == 'whatever' ? 'whatever' : 'mailgun';
+			$settings[ 'mailgun' ][ 'domain' ] = str_replace( array( 'http://', 'https://' ), '', $_REQUEST[ 'gc' ][ 'mailgun' ][ 'domain' ] );
+			$settings[ 'mailgun' ][ 'domain' ] = explode( '/', $settings[ 'mailgun' ][ 'domain' ] );
+			$settings[ 'mailgun' ][ 'domain' ] = str_replace( 'www.', '', $settings[ 'mailgun' ][ 'domain' ][ 0 ] );
+			$settings[ 'mailgun' ][ 'apikey' ] = $_REQUEST[ 'gc' ][ 'mailgun' ][ 'apikey' ];
+			$settings[ 'from_email_address' ]  = ( isset( $_REQUEST[ 'gc' ][ 'from_email_address' ] ) && is_email( $_REQUEST[ 'gc' ][ 'from_email_address' ] ) ) ? $_REQUEST[ 'gc' ][ 'from_email_address' ] : ( 'newsletter@' . $settings[ 'mailgun' ][ 'domain' ] );
+
+			update_option( 'grabconversions_settings', $settings );
+		}
 		?>
+
         <div class="wrap">
             <h2>GrabConversions Settings</h2>
-            <form id="gc-settings" action="POST">
+            <form method="POST">
                 <input type="hidden" name="action" value="grabconversions_settings_submit"/>
                 <table class="form-table">
                     <tbody>
@@ -286,30 +295,41 @@ class GrabConversions_Core {
                             </fieldset>
                         </td>
                     </tr>
-                    <tr valign="top">
+                    <tr valign="top" class="mailgun">
                         <th scope="row">
                             Mailgun Domain Name
                         </th>
                         <td>
                             <legend class="screen-reader-text"><span>Mailgun Domain Name</span></legend>
-                            <input type="text" class="regular-text" name="gc[mailgun][domain]" value="<?php echo $settings[ 'mailgun']['domain' ] ?>" placeholder="samples.mailgun.org"/>
+                            <input type="text" class="regular-text" name="gc[mailgun][domain]" value="<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>" placeholder="samples.mailgun.org"/>
                             <p class="description">Your Mailgun Domain Name</p>
                         </td>
                     </tr>
-                    <tr valign="top" class="mailgun-api">
+                    <tr valign="top" class="mailgun">
                         <th scope="row">
                             Mailgun API Key
                         </th>
                         <td>
                             <legend class="screen-reader-text"><span>Mailgun API Key</span></legend>
-                            <input type="text" class="regular-text" name="gc[mailgun][apikey]" value="<?php echo $settings[ 'mailgun']['apikey' ] ?>" placeholder="key-3ax6xnjp29jd6fds4gc373sgvjxteol0"/>
+                            <input type="text" class="regular-text" name="gc[mailgun][apikey]" value="<?php echo $settings[ 'mailgun' ][ 'apikey' ] ?>" placeholder="key-3ax6xnjp29jd6fds4gc373sgvjxteol0"/>
                             <p class="description">Your Mailgun API key, that starts with and includes "key-"</p>
+                        </td>
+                    </tr>
+                    <tr valign="top" class="">
+                        <th scope="row">
+                            Send Mail From
+                        </th>
+                        <td>
+                            <legend class="screen-reader-text"><span>Send Mail From</span></legend>
+                            <input type="text" class="regular-text" name="gc[from_email_address]" value="<?php echo $settings[ 'from_email_address' ] ?>"
+                                   placeholder="newsletter@<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>"/>
+                            <p class="description">Emails will appear to come from this email address</p>
                         </td>
                     </tr>
                     </tbody>
                 </table>
+                <input type="submit" name="submit" id="submit" class="button button-primary" value="Save Changes"/>
             </form>
-            <input type="submit" name="submit" id="submit" class="button button-primary" value="Save Changes" />
         </div>
 		<?php
 	}
@@ -429,27 +449,6 @@ class GrabConversions_Core {
 				die( 'Sorry! The URL seems to be invalid.' );
 			}
 		}
-	}
-
-	public function settings_submit() {
-		if ( !is_user_logged_in() ) {
-			wp_send_json_error( array( 'Not logged in!', 401 ) );
-		}
-
-		if ( !current_user_can( 'manage_options' ) ) {
-			wp_send_json_error( array( 'Not an administrator!', 401 ) );
-		}
-
-		$gc_settings = array();
-		$gc_settings['email_engine'] = $_REQUEST['gc']['email_engine'] == 'whatever' ? 'whatever' : 'mailgun';
-		$gc_settings['mailgun']['domain'] = str_replace( array( 'http://', 'https://' ), '', $_REQUEST['gc']['mailgun']['domain'] );
-		$gc_settings['mailgun']['domain'] = explode( '/', $gc_settings['mailgun']['domain'] );
-		$gc_settings['mailgun']['domain'] = str_replace( 'www.', '', $gc_settings['mailgun']['domain'][0] );
-        $gc_settings['mailgun']['apikey'] = $_REQUEST['gc']['mailgun']['apikey'];
-
-		update_option( 'grabconversions_settings', $gc_settings );
-
-		wp_send_json_success();
 	}
 }
 

@@ -1,6 +1,7 @@
 (function ($) {
 	$(document).ready(function () {
-		$('#submit').click(function () {
+		$('form#ashfame').on('submit',function () {
+			alert();
 			$.ajax({
 				type: 'POST',
 				url: ajaxurl,
