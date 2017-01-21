@@ -69,7 +69,7 @@ class GrabConversions_Core {
 			}
 		}
 
-		// @TODO have to add a created_date
+		// @TODO have to add a created_date column
 		$sql = "CREATE TABLE " . self::$subscribers_table_name . " (
 		  id BIGINT NOT NULL AUTO_INCREMENT,
 		  name varchar(200) NOT NULL,
@@ -88,6 +88,7 @@ class GrabConversions_Core {
 
 	public function init() {
 		add_action( 'wp_enqueue_scripts', array( $this, 'enqueue_scripts' ) );
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_admin_scripts' ) );
 
 		add_action( 'widgets_init', array( $this, 'widget_init' ), 10, 2 );
 		add_filter( 'plugin_action_links', array( $this, 'plugin_action_links' ), 10, 2 );
@@ -98,6 +99,10 @@ class GrabConversions_Core {
 
 		// widget + add-ons announce after collecting optin data for processing
 		add_action( 'grabconversions_announce_optin', array( $this, 'collect_optin_data' ) );
+
+		// settings screen
+		add_action( 'wp_ajax_grabconversions_settings_submit', array( $this, 'settings_submit' ) );
+		add_action( 'wp_ajax_nopriv_grabconversions_settings_submit', array( $this, 'settings_submit' ) );
 
 		// handle confirmation of email subscriptions
 		add_action( 'wp_ajax_grabconversions_confirm_email_subscription', array( $this, 'confirm_email_subscription' ) );
@@ -126,6 +131,12 @@ class GrabConversions_Core {
 			'ajax_url' => admin_url( 'admin-ajax.php' )
 		) );
 	}
+
+	public function enqueue_admin_scripts( $hook ) {
+		if ( $hook == 'grab-conversions_page_grabconversions_settings' ) {
+			wp_enqueue_script( 'grabconversions_admin_js', plugins_url( 'js/admin.js', __FILE__ ), array( 'jquery' ), self::$version, true );
+		}
+    }
 
 	public function admin_header() {
 		$page = ( isset( $_GET[ 'page' ] ) ) ? esc_attr( $_GET[ 'page' ] ) : false;
@@ -158,9 +169,13 @@ class GrabConversions_Core {
 	}
 
 	public function add_gc_menu_page() {
-		$hook = add_menu_page( __( 'Grab Conversions', 'textdomain' ), 'Grab Conversions&nbsp;&nbsp;&nbsp;', 'manage_options', 'grabconversions_subscribers_list', array( $this, 'gc_menu_page_render' ), 'dashicons-email', 60 );
+		$hook = add_menu_page( __( 'Grab Conversions', 'textdomain' ), 'Grab Conversions&nbsp;&nbsp;&nbsp;', 'manage_options', 'grabconversions_subscribers_list', array(
+			$this,
+			'gc_menu_page_render'
+		), 'dashicons-email', 60 );
 		add_submenu_page( 'grabconversions_subscribers_list', 'Subscribers', 'Subscribers', 'manage_options', 'grabconversions_subscribers_list', array( $this, 'gc_menu_page_render' ) );
 		add_submenu_page( 'grabconversions_subscribers_list', 'Broadcast', 'Broadcast', 'manage_options', 'grabconversions_broadcast', array( $this, 'gc_menu_broadcast_page_render' ) );
+		add_submenu_page( 'grabconversions_subscribers_list', 'Settings', 'Settings', 'manage_options', 'grabconversions_settings', array( $this, 'gc_menu_settings_page_render' ) );
 
 		add_action( 'load-' . $hook, array( $this, 'gc_menu_page_screen_options' ) );
 	}
@@ -182,13 +197,13 @@ class GrabConversions_Core {
 	public function get_subscribers_summary() {
 		global $wpdb;
 
-        $summary = array();
+		$summary = array();
 
-        foreach ( self::$subscriber_statuses as $key => $label ) {
-            $summary[ 'count' ][ $key ] = $wpdb->get_var( "SELECT COUNT(*) FROM " . self::$subscribers_table_name . " WHERE status = $key;" );
-        }
+		foreach ( self::$subscriber_statuses as $key => $label ) {
+			$summary[ 'count' ][ $key ] = $wpdb->get_var( "SELECT COUNT(*) FROM " . self::$subscribers_table_name . " WHERE status = $key;" );
+		}
 
-        update_option( 'gc_cache_subscribers_summary', $summary, true );
+		update_option( 'gc_cache_subscribers_summary', $summary, true );
 
 		return $summary;
 	}
@@ -205,33 +220,33 @@ class GrabConversions_Core {
 				<?php $GrabConversions_Subscribers_List_Table->search_box( 'search', 'search_id' ); ?>
             </form>
             <form method="POST">
-                <?php
-                $admin_url           = admin_url( 'admin.php?page=grabconversions_subscribers_list' );
-                $subscribers_summary = $this->get_subscribers_summary();
-                ?>
+				<?php
+				$admin_url           = admin_url( 'admin.php?page=grabconversions_subscribers_list' );
+				$subscribers_summary = $this->get_subscribers_summary();
+				?>
                 <ul class="subsubsub">
                     <li class="all">
                         <a href="<?php echo $admin_url; ?>"
                            class="<?php if ( strpos( 'http://' . $_SERVER[ 'HTTP_HOST' ] . $_SERVER[ 'REQUEST_URI' ], $admin_url ) === 0 && strpos( $_SERVER[ 'REQUEST_URI' ], '&status=' ) === false )
-                               echo 'current'; ?>">
-                            <?php _e( 'All' ); ?>
+							   echo 'current'; ?>">
+							<?php _e( 'All' ); ?>
                             <span class="count">(<?php echo array_sum( $subscribers_summary[ 'count' ] ); ?>)</span>
                         </a>
                     </li>
-                    <?php foreach ( self::$subscriber_statuses as $key => $label ) { ?>
-                        <?php if ( $key == 9 )
-                            continue; ?>
+					<?php foreach ( self::$subscriber_statuses as $key => $label ) { ?>
+						<?php if ( $key == 9 )
+							continue; ?>
                         <li class="">|
                             <a href="<?php echo add_query_arg( 'status', $label, $admin_url ); ?>"
                                class="<?php if ( strpos( 'http://' . $_SERVER[ 'HTTP_HOST' ] . $_SERVER[ 'REQUEST_URI' ], add_query_arg( 'status', $label, $admin_url ) ) === 0 )
-                                   echo 'current'; ?>">
-                                <?php _e( ucfirst( $label ) ); ?>
+								   echo 'current'; ?>">
+								<?php _e( ucfirst( $label ) ); ?>
                                 <span class="count">(<?php echo $subscribers_summary[ 'count' ][ $key ]; ?>)</span>
                             </a>
                         </li>
-                    <?php } ?>
+					<?php } ?>
                 </ul>
-                <?php $GrabConversions_Subscribers_List_Table->display(); ?>
+				<?php $GrabConversions_Subscribers_List_Table->display(); ?>
             </form>
         </div>
 		<?php
@@ -239,7 +254,65 @@ class GrabConversions_Core {
 
 	public function gc_menu_broadcast_page_render() {
 
-    }
+	}
+
+	public function gc_menu_settings_page_render() {
+	    // Settings API is deliberately not used here, since we want to inject JS show/hide + handle data upgrades as product matures
+		$settings = get_option( 'grabconversions_settings', array() );
+		?>
+        <div class="wrap">
+            <h2>GrabConversions Settings</h2>
+            <form id="gc-settings" action="POST">
+                <input type="hidden" name="action" value="grabconversions_settings_submit"/>
+                <table class="form-table">
+                    <tbody>
+                    <tr>
+                        <th scope="row">Email Engine</th>
+                        <td id="email-engine-setting">
+                            <fieldset>
+                                <legend class="screen-reader-text"><span>Email Engine</span></legend>
+                                <p>
+                                    <label>
+                                        <input name="gc[email_engine]" type="radio" value="whatever" <?php checked( $settings[ 'email_engine' ], 'whatever', true ) ?>>
+                                        Use what WordPress is using
+                                    </label>
+                                </p>
+                                <p>
+                                    <label>
+                                        <input name="gc[email_engine]" type="radio" value="mailgun" <?php checked( $settings[ 'email_engine' ], 'mailgun', true ) ?>>
+                                        Use <a target="_blank" href="http://www.mailgun.com/">Mailgun</a> API (recommended)
+                                    </label>
+                                </p>
+                            </fieldset>
+                        </td>
+                    </tr>
+                    <tr valign="top">
+                        <th scope="row">
+                            Mailgun Domain Name
+                        </th>
+                        <td>
+                            <legend class="screen-reader-text"><span>Mailgun Domain Name</span></legend>
+                            <input type="text" class="regular-text" name="gc[mailgun][domain]" value="<?php echo $settings[ 'mailgun']['domain' ] ?>" placeholder="samples.mailgun.org"/>
+                            <p class="description">Your Mailgun Domain Name</p>
+                        </td>
+                    </tr>
+                    <tr valign="top" class="mailgun-api">
+                        <th scope="row">
+                            Mailgun API Key
+                        </th>
+                        <td>
+                            <legend class="screen-reader-text"><span>Mailgun API Key</span></legend>
+                            <input type="text" class="regular-text" name="gc[mailgun][apikey]" value="<?php echo $settings[ 'mailgun']['apikey' ] ?>" placeholder="key-3ax6xnjp29jd6fds4gc373sgvjxteol0"/>
+                            <p class="description">Your Mailgun API key, that starts with and includes "key-"</p>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+            </form>
+            <input type="submit" name="submit" id="submit" class="button button-primary" value="Save Changes" />
+        </div>
+		<?php
+	}
 
 	public function generate_confirmation_key( $email, $skip_db_write = false ) {
 		global $wpdb;
@@ -274,11 +347,11 @@ class GrabConversions_Core {
 			);
 
 			$result = $wpdb->insert( $wpdb->prefix . 'grabconversions_list_data', $row, array(
-					'%s',
-					'%s',
-					'%d',
-					'%s'
-				) );
+				'%s',
+				'%s',
+				'%d',
+				'%s'
+			) );
 
 			if ( $result ) {
 				if ( $data[ 'doubleoptin' ] ) { // shouldn't double optin be the only choice, no single-optins allowed #mustThink
@@ -356,6 +429,27 @@ class GrabConversions_Core {
 				die( 'Sorry! The URL seems to be invalid.' );
 			}
 		}
+	}
+
+	public function settings_submit() {
+		if ( !is_user_logged_in() ) {
+			wp_send_json_error( array( 'Not logged in!', 401 ) );
+		}
+
+		if ( !current_user_can( 'manage_options' ) ) {
+			wp_send_json_error( array( 'Not an administrator!', 401 ) );
+		}
+
+		$gc_settings = array();
+		$gc_settings['email_engine'] = $_REQUEST['gc']['email_engine'] == 'whatever' ? 'whatever' : 'mailgun';
+		$gc_settings['mailgun']['domain'] = str_replace( array( 'http://', 'https://' ), '', $_REQUEST['gc']['mailgun']['domain'] );
+		$gc_settings['mailgun']['domain'] = explode( '/', $gc_settings['mailgun']['domain'] );
+		$gc_settings['mailgun']['domain'] = str_replace( 'www.', '', $gc_settings['mailgun']['domain'][0] );
+        $gc_settings['mailgun']['apikey'] = $_REQUEST['gc']['mailgun']['apikey'];
+
+		update_option( 'grabconversions_settings', $gc_settings );
+
+		wp_send_json_success();
 	}
 }
 
