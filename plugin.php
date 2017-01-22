@@ -17,7 +17,7 @@ class GrabConversions_Core {
 	private static $instance;
 
 	public static $version = '0.1-alpha';
-	public static $required_wp_version = '4.6';
+	public static $required_wp_version = '4.7';
 	// both PHP & MySQL versions are what WordPress itself recommends
 	public static $required_php_version = '5.6';
 	public static $required_mysql_version = '5.6'; // not sure how to use / check this one
@@ -69,7 +69,6 @@ class GrabConversions_Core {
 			}
 		}
 
-		// @TODO have to add a created_date column
 		$sql = "CREATE TABLE " . self::$subscribers_table_name . " (
 		  id BIGINT NOT NULL AUTO_INCREMENT,
 		  name varchar(200) NOT NULL,
@@ -132,6 +131,9 @@ class GrabConversions_Core {
 	public function enqueue_admin_scripts( $hook ) {
 		if ( $hook == 'grab-conversions_page_grabconversions_settings' ) {
 			wp_enqueue_script( 'grabconversions_admin_js', plugins_url( 'js/admin.js', __FILE__ ), array( 'jquery' ), self::$version, true );
+		} else if ( $hook == 'grab-conversions_page_grabconversions_broadcast' ) {
+			wp_enqueue_script( 'grabconversions_trix_js', plugins_url( 'js/trix/trix.js', __FILE__ ), array(), '0.10.0', true );
+			wp_enqueue_style( 'grabconversions_trix_css', plugins_url( 'css/trix/trix.css', __FILE__ ), array(), '0.10.0' );
 		}
 	}
 
@@ -250,7 +252,65 @@ class GrabConversions_Core {
 	}
 
 	public function gc_menu_broadcast_page_render() {
+		$settings = get_option( 'grabconversions_settings', array() );
+		echo '<pre>';
+		print_r( $_POST );
+		echo '</pre>';
 
+		require plugin_dir_path( __FILE__ ) . 'includes/mailgun/Mailgun.php';
+		//use Mailgun\Mailgun;
+
+		$mg     = new \Mailgun\Mailgun( $settings[ 'mailgun' ][ 'apikey' ] );
+		$domain = $settings[ 'mailgun' ][ 'domain' ];
+
+		$mg->sendMessage( $domain, array(
+			'from'    => $settings[ 'from_email_address' ],
+			'to'      => 'ashishsainiashfame@gmail.com',
+			'subject' => $_POST[ 'broadcast-subject' ],
+			'text'    => $_POST[ 'broadcast-message' ]
+		) );
+
+		?>
+        <div class="wrap">
+            <h2>Broadcast</h2>
+            <form action="" method="POST">
+                <table class="form-table">
+                    <tbody>
+                    <tr>
+                        <th scope="row">From</th>
+                        <td>
+                            <input type="text" class="regular-text" readonly="readonly" value="<?php echo $settings[ 'from_email_address' ]; ?>"/>
+                            <p class="description">You can change this in settings</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">To</th>
+                        <td>
+                            <p>All Subscribers (Total of <?php echo $this->get_confirmed_subscribers_count() ?> subscribers)</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Subject</th>
+                        <td>
+                            <input type="text" class="regular-text" name="broadcast-subject" placeholder="News that you have been waiting to hear"/>
+                            <p class="description">You can change this in settings</p>
+                        </td>
+                    </tr>
+                    <tr>
+                        <th scope="row">Message</th>
+                        <td>
+                            <trix-editor input="broadcast-message"></trix-editor>
+                            <input id="broadcast-message" name="broadcast-message" type="hidden" value="Hi {NAME}, <br /><br />How is it going?"/>
+                            <p class="description">Use {NAME} as variable, which will be replaced with actual name of the subscriber</p>
+                        </td>
+                    </tr>
+                    </tbody>
+                </table>
+                <input type="submit" name="submit" id="submit" class="button button-primary" value="Send Broadcast"/>
+                <input type="submit" name="submit" id="submit" class="button" value="Send as a test to yourself"/>
+            </form>
+        </div>
+		<?php
 	}
 
 	public function gc_menu_settings_page_render() {
@@ -453,6 +513,12 @@ class GrabConversions_Core {
 				die( 'Sorry! The URL seems to be invalid.' );
 			}
 		}
+	}
+
+	public function get_confirmed_subscribers_count() {
+		global $wpdb;
+
+		return $wpdb->get_var( "SELECT COUNT(*) FROM " . self::$subscribers_table_name . " WHERE status = 1;" );
 	}
 }
 
