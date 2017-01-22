@@ -366,7 +366,7 @@ class GrabConversions_Core {
 				'name'             => $data[ 'name' ],
 				'email'            => $data[ 'email' ],
 				'status'           => $data[ 'doubleoptin' ] ? 0 : 1,
-				'created_at'       => $now->format( 'Y-m-d h:i:s' ),
+				'created_at'       => $now->format( 'Y-m-d h:i:s' ), // GMT
 				'confirmation_key' => $data[ 'doubleoptin' ] ? $this->generate_confirmation_key( $data[ 'email' ], true ) : ''
 			);
 
