@@ -74,7 +74,8 @@ class GrabConversions_Core {
 		  name varchar(200) NOT NULL,
 		  email VARCHAR(100) NOT NULL,
 		  status TINYINT NULL DEFAULT 0,
-		  created_at TIMESTAMP NOT NULL,
+		  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		  optin_at DATETIME NOT NULL,
 		  confirmation_key VARCHAR(255) NULL,
 		  PRIMARY KEY (id)
 		  KEY email (email)
@@ -252,23 +253,56 @@ class GrabConversions_Core {
 	}
 
 	public function gc_menu_broadcast_page_render() {
+
 		$settings = get_option( 'grabconversions_settings', array() );
 		echo '<pre>';
+		print_r( $settings );
 		print_r( $_POST );
 		echo '</pre>';
 
-		require plugin_dir_path( __FILE__ ) . 'includes/mailgun/Mailgun.php';
-		//use Mailgun\Mailgun;
+		if ( isset( $_REQUEST[ 'submit' ] ) ) {
+			require plugin_dir_path( __FILE__ ) . 'vendor/autoload.php';
 
-		$mg     = new \Mailgun\Mailgun( $settings[ 'mailgun' ][ 'apikey' ] );
-		$domain = $settings[ 'mailgun' ][ 'domain' ];
+			$client = new \Http\Adapter\Guzzle6\Client();
+			$mg     = new \Mailgun\Mailgun( $settings[ 'mailgun' ][ 'apikey' ], $client );
+			$domain = $settings[ 'mailgun' ][ 'domain' ];
 
-		$mg->sendMessage( $domain, array(
-			'from'    => $settings[ 'from_email_address' ],
-			'to'      => 'ashishsainiashfame@gmail.com',
-			'subject' => $_POST[ 'broadcast-subject' ],
-			'text'    => $_POST[ 'broadcast-message' ]
-		) );
+			// get ready with first name & last name
+			if ( !empty( $settings[ 'send_as' ] ) ) {
+				$exploded           = explode( ' ', $settings[ 'send_as' ] );
+				$send_as_first_name = $exploded[ 0 ];
+				unset( $exploded[ 0 ] );
+				$send_as_last_name = implode( ' ', $exploded );
+			}
+
+			/*
+			$result = $mg->sendMessage( $domain, array(
+				'from'    => $settings[ 'from_email_address' ],
+				'to'      => 'ashishsainiashfame@gmail.com',
+				'subject' => $_POST[ 'broadcast-subject' ],
+				'text'    => $_POST[ 'broadcast-message' ]
+			) );
+
+			var_dump( $result );
+			*/
+
+			# Next, instantiate a Message Builder object from the SDK, pass in your sending domain
+			$batchMsg = $mg->BatchMessage( $domain );
+
+			# Define the from address.
+			$batchMsg->setFromAddress( $settings[ 'send_from' ], array( 'first' => $send_as_first_name, 'last' => $send_as_last_name ) );
+			# Define the subject.
+			$batchMsg->setSubject( $_REQUEST[ 'broadcast-subject' ] );
+			# Define the body of the message.
+			$batchMsg->setTextBody( $_REQUEST[ 'broadcast-message' ] );
+
+			# Next, let's add a few recipients to the batch job.
+			$batchMsg->addToRecipient( 'ashishsainiashfame@gmail.com', array( 'first' => 'pam', 'last' => '', 'unsubscribe_link' => '' ) );
+			// After 1,000 recipeints, Batch Message will automatically post your message to the messages endpoint .
+
+			// Call finalize() to send any remaining recipients still in the buffer.
+			$batchMsg->finalize();
+		}
 
 		?>
         <div class="wrap">
@@ -279,7 +313,8 @@ class GrabConversions_Core {
                     <tr>
                         <th scope="row">From</th>
                         <td>
-                            <input type="text" class="regular-text" readonly="readonly" value="<?php echo $settings[ 'from_email_address' ]; ?>"/>
+							<?php $css_class = ( strlen( $settings[ 'send_from' ] ) > 40 ) ? 'large-text' : 'regular-text'; ?>
+                            <input type="text" class="<?php echo $css_class; ?>" readonly="readonly" value="<?php echo $settings[ 'send_from' ]; ?>"/>
                             <p class="description">You can change this in settings</p>
                         </td>
                     </tr>
@@ -307,7 +342,7 @@ class GrabConversions_Core {
                     </tbody>
                 </table>
                 <input type="submit" name="submit" id="submit" class="button button-primary" value="Send Broadcast"/>
-                <input type="submit" name="submit" id="submit" class="button" value="Send as a test to yourself"/>
+                <input type="submit" name="submit2" id="submit2" class="button" value="Send as a test to yourself"/>
             </form>
         </div>
 		<?php
@@ -324,7 +359,8 @@ class GrabConversions_Core {
 			$settings[ 'mailgun' ][ 'domain' ] = explode( '/', $settings[ 'mailgun' ][ 'domain' ] );
 			$settings[ 'mailgun' ][ 'domain' ] = str_replace( 'www.', '', $settings[ 'mailgun' ][ 'domain' ][ 0 ] );
 			$settings[ 'mailgun' ][ 'apikey' ] = $_REQUEST[ 'gc' ][ 'mailgun' ][ 'apikey' ];
-			$settings[ 'from_email_address' ]  = ( isset( $_REQUEST[ 'gc' ][ 'from_email_address' ] ) && is_email( $_REQUEST[ 'gc' ][ 'from_email_address' ] ) ) ? $_REQUEST[ 'gc' ][ 'from_email_address' ] : ( 'newsletter@' . $settings[ 'mailgun' ][ 'domain' ] );
+			$settings[ 'send_from' ]           = ( isset( $_REQUEST[ 'gc' ][ 'send_from' ] ) && is_email( $_REQUEST[ 'gc' ][ 'send_from' ] ) ) ? $_REQUEST[ 'gc' ][ 'send_from' ] : ( 'newsletter@' . $settings[ 'mailgun' ][ 'domain' ] );
+			$settings[ 'send_as' ]             = isset( $_REQUEST[ 'gc' ][ 'send_as' ] ) ? $_REQUEST[ 'gc' ][ 'send_as' ] : '';
 
 			update_option( 'grabconversions_settings', $settings );
 		}
@@ -362,7 +398,8 @@ class GrabConversions_Core {
                         </th>
                         <td>
                             <legend class="screen-reader-text"><span>Mailgun Domain Name</span></legend>
-                            <input type="text" class="regular-text" name="gc[mailgun][domain]" value="<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>" placeholder="samples.mailgun.org"/>
+							<?php $css_class = ( strlen( $settings[ 'mailgun' ][ 'domain' ] ) > 40 ) ? 'large-text' : 'regular-text'; ?>
+                            <input type="text" class="<?php echo $css_class; ?>" name="gc[mailgun][domain]" value="<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>" placeholder="samples.mailgun.org"/>
                             <p class="description">Your Mailgun Domain Name</p>
                         </td>
                     </tr>
@@ -378,11 +415,23 @@ class GrabConversions_Core {
                     </tr>
                     <tr valign="top" class="">
                         <th scope="row">
-                            Send Mail From
+                            Mailgun Send From
                         </th>
                         <td>
-                            <legend class="screen-reader-text"><span>Send Mail From</span></legend>
-                            <input type="text" class="regular-text" name="gc[from_email_address]" value="<?php echo $settings[ 'from_email_address' ] ?>"
+                            <legend class="screen-reader-text"><span>Mailgun Send From</span></legend>
+							<?php $css_class = ( strlen( $settings[ 'send_from' ] ) > 40 ) ? 'large-text' : 'regular-text'; ?>
+                            <input type="text" class="<?php echo $css_class; ?>" name="gc[send_from]" value="<?php echo $settings[ 'send_from' ] ?>"
+                                   placeholder="newsletter@<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>"/>
+                            <p class="description">Emails will appear to come from this email address</p>
+                        </td>
+                    </tr>
+                    <tr valign="top" class="">
+                        <th scope="row">
+                            Mailgun Send As
+                        </th>
+                        <td>
+                            <legend class="screen-reader-text"><span>Mailgun Send As</span></legend>
+                            <input type="text" class="regular-text" name="gc[send_as]" value="<?php echo $settings[ 'send_as' ] ?>"
                                    placeholder="newsletter@<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>"/>
                             <p class="description">Emails will appear to come from this email address</p>
                         </td>
@@ -418,15 +467,16 @@ class GrabConversions_Core {
 
 		// lets check if we already have this email as a subscriber (unconfirmed/confirmed)
 		$result = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM " . self::$subscribers_table_name . " WHERE email = '%s';", array( $data[ 'email' ] ) ), ARRAY_A );
+		$now = new DateTime( 'now', new DateTimeZone( 'GMT' ) );
 
 		if ( is_null( $result ) ) {
 
-			$now = new DateTime( 'now', new DateTimeZone( 'GMT' ) );
 			$row = array(
 				'name'             => $data[ 'name' ],
 				'email'            => $data[ 'email' ],
 				'status'           => $data[ 'doubleoptin' ] ? 0 : 1,
 				'created_at'       => $now->format( 'Y-m-d h:i:s' ), // GMT
+				'optin_at'         => $now->format( 'Y-m-d h:i:s' ), // GMT
 				'confirmation_key' => $data[ 'doubleoptin' ] ? $this->generate_confirmation_key( $data[ 'email' ], true ) : ''
 			);
 
@@ -450,7 +500,7 @@ class GrabConversions_Core {
 				// user is already confirmed, nothing to do here till we have tags/segments to worry about
 			} else if ( $result[ 'status' ] == 9 ) {
 				// user is deleted, bring it back to life
-				$wpdb->update( self::$subscribers_table_name, array( 'status' => 0 ), array( 'id' => $result[ 'id' ] ), array( '%d' ), array( '%d' ) );
+				$wpdb->update( self::$subscribers_table_name, array( 'status' => 0, 'optin_at' => $now->format( 'Y-m-d h:i:s' ) ), array( 'id' => $result[ 'id' ] ), array( '%d', '%s' ), array( '%d' ) );
 
 				// send double-optin email to the subscriber now
 				$this->send_double_optin_confirmation_email( $data[ 'email' ] );
@@ -508,7 +558,8 @@ class GrabConversions_Core {
 			if ( $email_hash == md5( $result[ 'email' ] ) ) {
 				// verified, mark status as deleted/unsubscribed
 				$wpdb->update( self::$subscribers_table_name, array( 'status' => 9 ), array( 'id' => $result[ 'id' ] ), array( '%d' ), array( '%d' ) );
-				die( 'Sorry to see you go! You have been unsubscribed.' );
+				$html = 'Sorry to see you go! You have been unsubscribed. <a href="">Undo?</a><script>document.getElementsByTagName("a")[0].href = window.location.href.replace("unsubscription","subscription");</script>';
+				die( $html );
 			} else {
 				die( 'Sorry! The URL seems to be invalid.' );
 			}
@@ -519,6 +570,12 @@ class GrabConversions_Core {
 		global $wpdb;
 
 		return $wpdb->get_var( "SELECT COUNT(*) FROM " . self::$subscribers_table_name . " WHERE status = 1;" );
+	}
+
+	public function get_all_confirmed_subscribers() {
+		global $wpdb;
+
+		return $wpdb->get_results( "SELECT name, email FROM " . self::$subscribers_table_name . " WHERE status = 1;", ARRAY_A );
 	}
 }
 
