@@ -1,2 +1,2 @@
 <?php
- // golden silence
+// golden silence

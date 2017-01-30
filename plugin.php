@@ -14,26 +14,27 @@ defined( 'ABSPATH' ) || die();
 
 class GrabConversions_Core {
 
+	public static  $version                = '0.1-alpha';
+	public static  $required_wp_version    = '4.7'; // this is what WordPress itself recommends
+	public static  $required_php_version   = '5.6'; // this is what WordPress runs on, but now it recommends PHP 7 to encourage faster adoption
+	public static  $required_mysql_version = '5.6';
+	public static  $subscribers_table_name; // not sure how to use / check this one
+	public static  $subscriber_statuses;
 	private static $instance;
-
-	public static $version = '0.1-alpha';
-	public static $required_wp_version = '4.7';
-	// both PHP & MySQL versions are what WordPress itself recommends
-	public static $required_php_version = '5.6';
-	public static $required_mysql_version = '5.6'; // not sure how to use / check this one
-
-	public static $subscribers_table_name;
-	public static $subscriber_statuses;
 
 	public function __construct() {
 		global $wpdb;
 
-		if ( !$this->is_compatible() ) {
+		if ( ! $this->is_compatible() ) {
 			return;
 		}
 
 		self::$subscribers_table_name = $wpdb->prefix . 'grabconversions_list_data';
-		self::$subscriber_statuses    = array( 0 => 'unconfirmed', 1 => 'confirmed', 9 => 'deleted' );
+		self::$subscriber_statuses    = array(
+			0 => 'unconfirmed',
+			1 => 'confirmed',
+			9 => 'deleted'
+		);
 
 		register_activation_hook( __FILE__, array( $this, 'activate' ) );
 		register_deactivation_hook( __FILE__, array( $this, 'deactivate' ) );
@@ -45,8 +46,21 @@ class GrabConversions_Core {
 		}
 	}
 
+	/**
+	 * Function to ensure that plugin is only run on a WordPress v4.6+ install
+	 *
+	 * Filter is available to change the output of this function if somebody wants to run on WordPress versions prior to 4.7
+	 *
+	 * @return boolean
+	 */
+	public function is_compatible() {
+		global $wp_version;
+
+		return apply_filters( 'grabconversions_compatibility', version_compare( $wp_version, self::$required_wp_version, '>=' ) && version_compare( phpversion(), self::$required_php_version ) );
+	}
+
 	public static function getInstance() {
-		if ( !self::$instance ) {
+		if ( ! self::$instance ) {
 			self::$instance = new self;
 		}
 
@@ -61,10 +75,10 @@ class GrabConversions_Core {
 		$collate = '';
 
 		if ( $wpdb->has_cap( 'collation' ) ) {
-			if ( !empty( $wpdb->charset ) ) {
+			if ( ! empty( $wpdb->charset ) ) {
 				$collate .= "DEFAULT CHARACTER SET $wpdb->charset";
 			}
-			if ( !empty( $wpdb->collate ) ) {
+			if ( ! empty( $wpdb->collate ) ) {
 				$collate .= " COLLATE $wpdb->collate";
 			}
 		}
@@ -74,7 +88,7 @@ class GrabConversions_Core {
 		  name varchar(200) NOT NULL,
 		  email VARCHAR(100) NOT NULL,
 		  status TINYINT NULL DEFAULT 0,
-		  created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		  created_at DATETIME NOT NULL,
 		  optin_at DATETIME NOT NULL,
 		  confirmation_key VARCHAR(255) NULL,
 		  PRIMARY KEY (id)
@@ -111,18 +125,6 @@ class GrabConversions_Core {
 		add_action( 'wp_ajax_nopriv_grabconversions_confirm_email_unsubscription', array( $this, 'confirm_email_unsubscription' ) );
 	}
 
-	/**
-	 * Function to ensure that plugin is only run on a WordPress v4.6+ install
-	 *
-	 * Filter is available to change the output of this function if somebody wants to run on WordPress versions prior to 4.7
-	 * @return boolean
-	 */
-	public function is_compatible() {
-		global $wp_version;
-
-		return apply_filters( 'grabconversions_compatibility', version_compare( $wp_version, self::$required_wp_version, '>=' ) && version_compare( phpversion(), self::$required_php_version ) );
-	}
-
 	public function enqueue_scripts() {
 		wp_register_script( 'grabconversions_widget_js', plugins_url( 'js/widget.js', __FILE__ ), array( 'jquery' ), self::$version, true );
 		wp_localize_script( 'grabconversions_widget_js', 'grabconversions', array(
@@ -141,8 +143,9 @@ class GrabConversions_Core {
 
 	public function admin_header() {
 		$page = ( isset( $_GET[ 'page' ] ) ) ? esc_attr( $_GET[ 'page' ] ) : false;
-		if ( 'grabconversions_subscribers_list' != $page )
+		if ( 'grabconversions_subscribers_list' != $page ) {
 			return;
+		}
 
 		echo '<style type="text/css">';
 		echo '.wp-list-table .column-name { width: 40%; }';
@@ -209,6 +212,51 @@ class GrabConversions_Core {
 		return $value;
 	}
 
+	public function gc_menu_page_render() {
+		$GrabConversions_Subscribers_List_Table = new GrabConversions_Subscribers_List_Table();
+		?>
+		<div class="wrap">
+			<div id="icon-users" class="icon32"></div>
+			<h2>Grab Conversions</h2>
+			<?php $GrabConversions_Subscribers_List_Table->prepare_items(); ?>
+			<form method="GET">
+				<input type="hidden" name="page" value="grabconversions_subscribers_list" />
+				<?php $GrabConversions_Subscribers_List_Table->search_box( 'search', 'search_id' ); ?>
+			</form>
+			<form method="POST">
+				<?php
+				$admin_url           = admin_url( 'admin.php?page=grabconversions_subscribers_list' );
+				$subscribers_summary = $this->get_subscribers_summary();
+				?>
+				<ul class="subsubsub">
+					<li class="all">
+						<a href="<?php echo $admin_url; ?>" class="<?php if ( strpos( 'http://' . $_SERVER[ 'HTTP_HOST' ] . $_SERVER[ 'REQUEST_URI' ], $admin_url ) === 0 && strpos( $_SERVER[ 'REQUEST_URI' ], '&status=' ) === false ) {
+							echo 'current';
+						} ?>">
+							<?php _e( 'All' ); ?>
+							<span class="count">(<?php echo array_sum( $subscribers_summary[ 'count' ] ); ?>)</span>
+						</a>
+					</li>
+					<?php foreach ( self::$subscriber_statuses as $key => $label ) { ?>
+						<?php if ( $key == 9 ) {
+							continue;
+						} ?>
+						<li class="">|
+							<a href="<?php echo add_query_arg( 'status', $label, $admin_url ); ?>" class="<?php if ( strpos( 'http://' . $_SERVER[ 'HTTP_HOST' ] . $_SERVER[ 'REQUEST_URI' ], add_query_arg( 'status', $label, $admin_url ) ) === 0 ) {
+								echo 'current';
+							} ?>">
+								<?php _e( ucfirst( $label ) ); ?>
+								<span class="count">(<?php echo $subscribers_summary[ 'count' ][ $key ]; ?>)</span>
+							</a>
+						</li>
+					<?php } ?>
+				</ul>
+				<?php $GrabConversions_Subscribers_List_Table->display(); ?>
+			</form>
+		</div>
+		<?php
+	}
+
 	public function get_subscribers_summary() {
 		global $wpdb;
 
@@ -221,50 +269,6 @@ class GrabConversions_Core {
 		update_option( 'gc_cache_subscribers_summary', $summary, true );
 
 		return $summary;
-	}
-
-	public function gc_menu_page_render() {
-		$GrabConversions_Subscribers_List_Table = new GrabConversions_Subscribers_List_Table();
-		?>
-        <div class="wrap">
-            <div id="icon-users" class="icon32"></div>
-            <h2>Grab Conversions</h2>
-			<?php $GrabConversions_Subscribers_List_Table->prepare_items(); ?>
-            <form method="GET">
-                <input type="hidden" name="page" value="grabconversions_subscribers_list"/>
-				<?php $GrabConversions_Subscribers_List_Table->search_box( 'search', 'search_id' ); ?>
-            </form>
-            <form method="POST">
-				<?php
-				$admin_url           = admin_url( 'admin.php?page=grabconversions_subscribers_list' );
-				$subscribers_summary = $this->get_subscribers_summary();
-				?>
-                <ul class="subsubsub">
-                    <li class="all">
-                        <a href="<?php echo $admin_url; ?>"
-                           class="<?php if ( strpos( 'http://' . $_SERVER[ 'HTTP_HOST' ] . $_SERVER[ 'REQUEST_URI' ], $admin_url ) === 0 && strpos( $_SERVER[ 'REQUEST_URI' ], '&status=' ) === false )
-							   echo 'current'; ?>">
-							<?php _e( 'All' ); ?>
-                            <span class="count">(<?php echo array_sum( $subscribers_summary[ 'count' ] ); ?>)</span>
-                        </a>
-                    </li>
-					<?php foreach ( self::$subscriber_statuses as $key => $label ) { ?>
-						<?php if ( $key == 9 )
-							continue; ?>
-                        <li class="">|
-                            <a href="<?php echo add_query_arg( 'status', $label, $admin_url ); ?>"
-                               class="<?php if ( strpos( 'http://' . $_SERVER[ 'HTTP_HOST' ] . $_SERVER[ 'REQUEST_URI' ], add_query_arg( 'status', $label, $admin_url ) ) === 0 )
-								   echo 'current'; ?>">
-								<?php _e( ucfirst( $label ) ); ?>
-                                <span class="count">(<?php echo $subscribers_summary[ 'count' ][ $key ]; ?>)</span>
-                            </a>
-                        </li>
-					<?php } ?>
-                </ul>
-				<?php $GrabConversions_Subscribers_List_Table->display(); ?>
-            </form>
-        </div>
-		<?php
 	}
 
 	public function gc_menu_broadcast_page_render() {
@@ -283,7 +287,7 @@ class GrabConversions_Core {
 			$domain = $settings[ 'mailgun' ][ 'domain' ];
 
 			// get ready with first name & last name
-			if ( !empty( $settings[ 'send_as' ] ) ) {
+			if ( ! empty( $settings[ 'send_as' ] ) ) {
 				$exploded           = explode( ' ', $settings[ 'send_as' ] );
 				$send_as_first_name = $exploded[ 0 ];
 				unset( $exploded[ 0 ] );
@@ -320,47 +324,53 @@ class GrabConversions_Core {
 		}
 
 		?>
-        <div class="wrap">
-            <h2>Broadcast</h2>
-            <form action="" method="POST">
-                <table class="form-table">
-                    <tbody>
-                    <tr>
-                        <th scope="row">From</th>
-                        <td>
+		<div class="wrap">
+			<h2>Broadcast</h2>
+			<form action="" method="POST">
+				<table class="form-table">
+					<tbody>
+					<tr>
+						<th scope="row">From</th>
+						<td>
 							<?php $css_class = ( strlen( $settings[ 'send_from' ] ) > 40 ) ? 'large-text' : 'regular-text'; ?>
-                            <input type="text" class="<?php echo $css_class; ?>" readonly="readonly" value="<?php echo $settings[ 'send_from' ]; ?>"/>
-                            <p class="description">You can change this in settings</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row">To</th>
-                        <td>
-                            <p>All Subscribers (Total of <?php echo $this->get_confirmed_subscribers_count() ?> subscribers)</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Subject</th>
-                        <td>
-                            <input type="text" class="regular-text" name="broadcast-subject" placeholder="News that you have been waiting to hear"/>
-                            <p class="description">You can change this in settings</p>
-                        </td>
-                    </tr>
-                    <tr>
-                        <th scope="row">Message</th>
-                        <td>
-                            <trix-editor input="broadcast-message"></trix-editor>
-                            <input id="broadcast-message" name="broadcast-message" type="hidden" value="Hi {NAME}, <br /><br />How is it going?"/>
-                            <p class="description">Use {NAME} as variable, which will be replaced with actual name of the subscriber</p>
-                        </td>
-                    </tr>
-                    </tbody>
-                </table>
-                <input type="submit" name="submit" id="submit" class="button button-primary" value="Send Broadcast"/>
-                <input type="submit" name="submit2" id="submit2" class="button" value="Send as a test to yourself"/>
-            </form>
-        </div>
+							<input type="text" class="<?php echo $css_class; ?>" readonly="readonly" value="<?php echo $settings[ 'send_from' ]; ?>" />
+							<p class="description">You can change this in settings</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">To</th>
+						<td>
+							<p>All Subscribers (Total of <?php echo $this->get_confirmed_subscribers_count() ?> subscribers)</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">Subject</th>
+						<td>
+							<input type="text" class="regular-text" name="broadcast-subject" placeholder="News that you have been waiting to hear" />
+							<p class="description">You can change this in settings</p>
+						</td>
+					</tr>
+					<tr>
+						<th scope="row">Message</th>
+						<td>
+							<trix-editor input="broadcast-message"></trix-editor>
+							<input id="broadcast-message" name="broadcast-message" type="hidden" value="Hi {NAME}, <br /><br />How is it going?" />
+							<p class="description">Use {NAME} as variable, which will be replaced with actual name of the subscriber</p>
+						</td>
+					</tr>
+					</tbody>
+				</table>
+				<input type="submit" name="submit" id="submit" class="button button-primary" value="Send Broadcast" />
+				<input type="submit" name="submit2" id="submit2" class="button" value="Send as a test to yourself" />
+			</form>
+		</div>
 		<?php
+	}
+
+	public function get_confirmed_subscribers_count() {
+		global $wpdb;
+
+		return $wpdb->get_var( "SELECT COUNT(*) FROM " . self::$subscribers_table_name . " WHERE status = 1;" );
 	}
 
 	public function gc_menu_settings_page_render() {
@@ -381,100 +391,82 @@ class GrabConversions_Core {
 		}
 		?>
 
-        <div class="wrap">
-            <h2>GrabConversions Settings</h2>
-            <form method="POST">
-                <input type="hidden" name="action" value="grabconversions_settings_submit"/>
-                <table class="form-table">
-                    <tbody>
-                    <tr>
-                        <th scope="row">Email Engine</th>
-                        <td id="email-engine-setting">
-                            <fieldset>
-                                <legend class="screen-reader-text"><span>Email Engine</span></legend>
-                                <p>
-                                    <label>
-                                        <input name="gc[email_engine]" type="radio" value="whatever" <?php checked( $settings[ 'email_engine' ], 'whatever', true ) ?>>
-                                        Use what WordPress is using
-                                    </label>
-                                </p>
-                                <p>
-                                    <label>
-                                        <input name="gc[email_engine]" type="radio" value="mailgun" <?php checked( $settings[ 'email_engine' ], 'mailgun', true ) ?>>
-                                        Use <a target="_blank" href="http://www.mailgun.com/">Mailgun</a> API (recommended)
-                                    </label>
-                                </p>
-                            </fieldset>
-                        </td>
-                    </tr>
-                    <tr valign="top" class="mailgun">
-                        <th scope="row">
-                            Mailgun Domain Name
-                        </th>
-                        <td>
-                            <legend class="screen-reader-text"><span>Mailgun Domain Name</span></legend>
+		<div class="wrap">
+			<h2>GrabConversions Settings</h2>
+			<form method="POST">
+				<input type="hidden" name="action" value="grabconversions_settings_submit" />
+				<table class="form-table">
+					<tbody>
+					<tr>
+						<th scope="row">Email Engine</th>
+						<td id="email-engine-setting">
+							<fieldset>
+								<legend class="screen-reader-text"><span>Email Engine</span></legend>
+								<p>
+									<label>
+										<input name="gc[email_engine]" type="radio" value="whatever" <?php checked( $settings[ 'email_engine' ], 'whatever', true ) ?>>
+										Use what WordPress is using
+									</label>
+								</p>
+								<p>
+									<label>
+										<input name="gc[email_engine]" type="radio" value="mailgun" <?php checked( $settings[ 'email_engine' ], 'mailgun', true ) ?>>
+										Use <a target="_blank" href="http://www.mailgun.com/">Mailgun</a> API (recommended)
+									</label>
+								</p>
+							</fieldset>
+						</td>
+					</tr>
+					<tr valign="top" class="mailgun">
+						<th scope="row">
+							Mailgun Domain Name
+						</th>
+						<td>
+							<legend class="screen-reader-text"><span>Mailgun Domain Name</span></legend>
 							<?php $css_class = ( strlen( $settings[ 'mailgun' ][ 'domain' ] ) > 40 ) ? 'large-text' : 'regular-text'; ?>
-                            <input type="text" class="<?php echo $css_class; ?>" name="gc[mailgun][domain]" value="<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>" placeholder="samples.mailgun.org"/>
-                            <p class="description">Your Mailgun Domain Name</p>
-                        </td>
-                    </tr>
-                    <tr valign="top" class="mailgun">
-                        <th scope="row">
-                            Mailgun API Key
-                        </th>
-                        <td>
-                            <legend class="screen-reader-text"><span>Mailgun API Key</span></legend>
-                            <input type="text" class="regular-text" name="gc[mailgun][apikey]" value="<?php echo $settings[ 'mailgun' ][ 'apikey' ] ?>" placeholder="key-3ax6xnjp29jd6fds4gc373sgvjxteol0"/>
-                            <p class="description">Your Mailgun API key, that starts with and includes "key-"</p>
-                        </td>
-                    </tr>
-                    <tr valign="top" class="">
-                        <th scope="row">
-                            Mailgun Send From
-                        </th>
-                        <td>
-                            <legend class="screen-reader-text"><span>Mailgun Send From</span></legend>
+							<input type="text" class="<?php echo $css_class; ?>" name="gc[mailgun][domain]" value="<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>" placeholder="samples.mailgun.org" />
+							<p class="description">Your Mailgun Domain Name</p>
+						</td>
+					</tr>
+					<tr valign="top" class="mailgun">
+						<th scope="row">
+							Mailgun API Key
+						</th>
+						<td>
+							<legend class="screen-reader-text"><span>Mailgun API Key</span></legend>
+							<input type="text" class="regular-text" name="gc[mailgun][apikey]" value="<?php echo $settings[ 'mailgun' ][ 'apikey' ] ?>" placeholder="key-3ax6xnjp29jd6fds4gc373sgvjxteol0" />
+							<p class="description">Your Mailgun API key, that starts with and includes "key-"</p>
+						</td>
+					</tr>
+					<tr valign="top" class="">
+						<th scope="row">
+							Mailgun Send From
+						</th>
+						<td>
+							<legend class="screen-reader-text"><span>Mailgun Send From</span></legend>
 							<?php $css_class = ( strlen( $settings[ 'send_from' ] ) > 40 ) ? 'large-text' : 'regular-text'; ?>
-                            <input type="text" class="<?php echo $css_class; ?>" name="gc[send_from]" value="<?php echo $settings[ 'send_from' ] ?>"
-                                   placeholder="newsletter@<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>"/>
-                            <p class="description">Emails will appear to come from this email address</p>
-                        </td>
-                    </tr>
-                    <tr valign="top" class="">
-                        <th scope="row">
-                            Mailgun Send As
-                        </th>
-                        <td>
-                            <legend class="screen-reader-text"><span>Mailgun Send As</span></legend>
-                            <input type="text" class="regular-text" name="gc[send_as]" value="<?php echo $settings[ 'send_as' ] ?>"
-                                   placeholder="newsletter@<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>"/>
-                            <p class="description">Emails will appear to come from this email address</p>
-                        </td>
-                    </tr>
-                    </tbody>
-                </table>
-                <input type="submit" name="submit" id="submit" class="button button-primary" value="Save Changes"/>
-            </form>
-        </div>
+							<input type="text" class="<?php echo $css_class; ?>" name="gc[send_from]" value="<?php echo $settings[ 'send_from' ] ?>"
+									placeholder="newsletter@<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>" />
+							<p class="description">Emails will appear to come from this email address</p>
+						</td>
+					</tr>
+					<tr valign="top" class="">
+						<th scope="row">
+							Mailgun Send As
+						</th>
+						<td>
+							<legend class="screen-reader-text"><span>Mailgun Send As</span></legend>
+							<input type="text" class="regular-text" name="gc[send_as]" value="<?php echo $settings[ 'send_as' ] ?>"
+									placeholder="newsletter@<?php echo $settings[ 'mailgun' ][ 'domain' ] ?>" />
+							<p class="description">Emails will appear to come from this email address</p>
+						</td>
+					</tr>
+					</tbody>
+				</table>
+				<input type="submit" name="submit" id="submit" class="button button-primary" value="Save Changes" />
+			</form>
+		</div>
 		<?php
-	}
-
-	public function generate_confirmation_key( $email, $skip_db_write = false ) {
-		global $wpdb;
-
-		$confirmation_key = substr( md5( time() . rand() . $email ), 0, 16 );
-
-		if ( !$skip_db_write ) {
-			$result = $wpdb->update( self::$subscribers_table_name, array( 'confirmation_key' => $confirmation_key ), array( 'email' => $email ), array( '%s' ), array( '%s' ) );
-
-			if ( $result ) {
-				return $confirmation_key;
-			} else {
-				return null;
-			}
-		}
-
-		return $confirmation_key;
 	}
 
 	public function collect_optin_data( $data ) {
@@ -526,8 +518,26 @@ class GrabConversions_Core {
 		}
 	}
 
+	public function generate_confirmation_key( $email, $skip_db_write = false ) {
+		global $wpdb;
+
+		$confirmation_key = substr( md5( time() . rand() . $email ), 0, 16 );
+
+		if ( ! $skip_db_write ) {
+			$result = $wpdb->update( self::$subscribers_table_name, array( 'confirmation_key' => $confirmation_key ), array( 'email' => $email ), array( '%s' ), array( '%s' ) );
+
+			if ( $result ) {
+				return $confirmation_key;
+			} else {
+				return null;
+			}
+		}
+
+		return $confirmation_key;
+	}
+
 	public function send_double_optin_confirmation_email( $email, $confirmation_key = '' ) {
-		if ( !$confirmation_key ) {
+		if ( ! $confirmation_key ) {
 			$confirmation_key = $this->generate_confirmation_key( $email );
 		}
 
@@ -579,12 +589,6 @@ class GrabConversions_Core {
 				die( 'Sorry! The URL seems to be invalid.' );
 			}
 		}
-	}
-
-	public function get_confirmed_subscribers_count() {
-		global $wpdb;
-
-		return $wpdb->get_var( "SELECT COUNT(*) FROM " . self::$subscribers_table_name . " WHERE status = 1;" );
 	}
 
 	public function get_all_confirmed_subscribers() {

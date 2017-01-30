@@ -1,6 +1,6 @@
 <?php
 
-if ( !class_exists( 'WP_List_Table' ) ) {
+if ( ! class_exists( 'WP_List_Table' ) ) {
 	require_once( ABSPATH . 'wp-admin/includes/class-wp-list-table.php' );
 }
 
@@ -23,17 +23,6 @@ class GrabConversions_Subscribers_List_Table extends WP_List_Table {
 		} else {
 			_e( 'No subscribers found! Why not add yourself as the first subscriber as a test? You will also get to see how your subscribers see the emails in their inbox, when you send a broadcast.' );
 		}
-	}
-
-	public function get_columns() {
-		$columns = array(
-			'cb'     => '<input type="checkbox" />',
-			'name'   => __( 'Name' ),
-			'email'  => __( 'Email address' ),
-			'status' => __( 'Status' )
-		);
-
-		return $columns;
 	}
 
 	public function column_default( $item, $column_name ) {
@@ -72,20 +61,6 @@ class GrabConversions_Subscribers_List_Table extends WP_List_Table {
 		return $actions;
 	}
 
-	public function maybe_process_bulk_action() {
-		global $wpdb;
-
-		if ( $this->current_action() && $this->current_action() == 'delete' ) {
-			$subscriber_ids = array_unique( array_filter( array_map( 'absint', $_POST[ 'subscribers' ] ) ) );
-
-			if ( !empty( $subscriber_ids ) ) {
-				$query              = "DELETE FROM " . Grabconversions_Core::$subscribers_table_name . " WHERE id IN (" . implode( ',', $subscriber_ids ) . ");";
-				$this->deleted_rows = $wpdb->query( $query );
-				$this->admin_notice_delete();
-			}
-		}
-	}
-
 	public function prepare_items() {
 		global $wpdb, $current_user;
 
@@ -107,7 +82,6 @@ class GrabConversions_Subscribers_List_Table extends WP_List_Table {
 			}
 
 			$this->items = $wpdb->get_results( $query, ARRAY_A );
-
 		} else if ( isset( $_REQUEST[ 'page' ] ) && isset( $_REQUEST[ 'status' ] ) && $_REQUEST[ 'page' ] == 'grabconversions_subscribers_list' ) {
 
 			$status = array_search( $_REQUEST[ 'status' ], GrabConversions_Core::$subscriber_statuses );
@@ -126,7 +100,6 @@ class GrabConversions_Subscribers_List_Table extends WP_List_Table {
 			) );
 
 			$this->items = array_slice( $data, ( ( $current_page - 1 ) * $per_page ), $per_page );
-
 		} else {
 
 			$query = "SELECT id, name, email, status FROM " . GrabConversions_Core::$subscribers_table_name . " WHERE status <> 9 ORDER BY id DESC;";
@@ -144,7 +117,31 @@ class GrabConversions_Subscribers_List_Table extends WP_List_Table {
 			) );
 
 			$this->items = array_slice( $data, ( ( $current_page - 1 ) * $per_page ), $per_page );
-
 		}
+	}
+
+	public function maybe_process_bulk_action() {
+		global $wpdb;
+
+		if ( $this->current_action() && $this->current_action() == 'delete' ) {
+			$subscriber_ids = array_unique( array_filter( array_map( 'absint', $_POST[ 'subscribers' ] ) ) );
+
+			if ( ! empty( $subscriber_ids ) ) {
+				$query              = "DELETE FROM " . Grabconversions_Core::$subscribers_table_name . " WHERE id IN (" . implode( ',', $subscriber_ids ) . ");";
+				$this->deleted_rows = $wpdb->query( $query );
+				$this->admin_notice_delete();
+			}
+		}
+	}
+
+	public function get_columns() {
+		$columns = array(
+			'cb'     => '<input type="checkbox" />',
+			'name'   => __( 'Name' ),
+			'email'  => __( 'Email address' ),
+			'status' => __( 'Status' )
+		);
+
+		return $columns;
 	}
 }
