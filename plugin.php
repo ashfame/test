@@ -97,6 +97,7 @@ class GrabConversions_Core {
 		add_action( 'admin_menu', array( $this, 'add_gc_menu_page' ) );
 		add_action( 'admin_head', array( $this, 'admin_header' ) );
 		add_filter( 'set-screen-option', array( $this, 'gc_menu_page_set_screen_options' ), 10, 3 );
+		add_action( 'in_admin_header', array( $this, 'kick_out_admin_notices' ), PHP_INT_MAX );
 
 		// widget + add-ons announce after collecting optin data for processing
 		add_action( 'grabconversions_announce_optin', array( $this, 'collect_optin_data' ) );
@@ -166,6 +167,20 @@ class GrabConversions_Core {
 		}
 
 		return $links;
+	}
+
+	public function kick_out_admin_notices() {
+		global $wp_filter, $current_screen;
+
+		if ( $current_screen && strpos( $current_screen->id, 'grabconversions' ) !== false ) {
+			if ( isset( $wp_filter[ "admin_notices" ] ) ) {
+				unset( $wp_filter[ 'admin_notices' ] );
+			}
+
+			if ( isset( $wp_filter[ "all_admin_notices" ] ) ) {
+				unset( $wp_filter[ 'all_admin_notices' ] );
+			}
+		}
 	}
 
 	public function add_gc_menu_page() {
@@ -467,7 +482,7 @@ class GrabConversions_Core {
 
 		// lets check if we already have this email as a subscriber (unconfirmed/confirmed)
 		$result = $wpdb->get_row( $wpdb->prepare( "SELECT * FROM " . self::$subscribers_table_name . " WHERE email = '%s';", array( $data[ 'email' ] ) ), ARRAY_A );
-		$now = new DateTime( 'now', new DateTimeZone( 'GMT' ) );
+		$now    = new DateTime( 'now', new DateTimeZone( 'GMT' ) );
 
 		if ( is_null( $result ) ) {
 
