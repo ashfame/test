@@ -114,7 +114,7 @@ class GrabConversions_Core {
 	/**
 	 * Function to ensure that plugin is only run on a WordPress v4.6+ install
 	 *
-	 * Filter is available to change the output of this function if somebody wants to run on WordPress versions prior to 4.6
+	 * Filter is available to change the output of this function if somebody wants to run on WordPress versions prior to 4.7
 	 * @return boolean
 	 */
 	public function is_compatible() {
