@@ -1,13 +1,13 @@
 # .scrutinizer.yml
 filter:
-	excluded_paths:
-		- "tests/"
-		- "bin/"
-		- "css/trix/"
-		- "js/trix/"
+    excluded_paths:
+        - "tests/"
+        - "bin/"
+        - "css/trix/"
+        - "js/trix/"
 checks:
-	php: true
-	javascript: true
+    php: true
+    javascript: true
 coding_style:
     php:
         indentation:
